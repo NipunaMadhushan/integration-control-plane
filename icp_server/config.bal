@@ -50,6 +50,13 @@ configurable int defaultTokenExpiryTime = 3600; // 1 hour
 configurable string authBackendUrl = "https://localhost:9447";
 configurable string authBackendApiKey = "default-api-key";
 
+// Observability backend configuration
+configurable string defaultObservabilityBackend = "opensearch";
+configurable string defaultObservabilityServiceHost = "localhost";
+configurable int defaultObservabilityServicePort = 9448;
+configurable string observabilityBackendUrl = "https://localhost:9448";
+configurable string observabilityBackendApiKey = "default-api-key";
+
 // SSO (OIDC) configuration
 configurable boolean ssoEnabled = false;
 configurable string ssoIssuer = "";
@@ -66,11 +73,6 @@ configurable string[] ssoScopes = ["openid", "email", "profile"];
 configurable string logLevel = "INFO"; // DEBUG, INFO, WARN, ERROR
 configurable boolean enableAuditLogging = true;
 configurable boolean enableMetrics = true;
-
-// OpenSearch configuration
-configurable string opensearchUrl = "https://opensearch:9200";
-configurable string opensearchUsername = "admin";
-configurable string opensearchPassword = "Ballerina@123";
 
 // Build SSO configuration from configurable values
 public isolated function getSSOConfig() returns types:SSOConfig => {

@@ -432,10 +432,10 @@ public type LogEntryRequest record {
     string endTime;
     int logStartIndex;
     int logCount;
-    string? runtime = ();
-    string? component = ();
-    string? environment = ();
-    string? project = ();
+    string|string[]? runtime = ();
+    string|string[]? component = ();
+    string|string[]? environment = ();
+    string|string[]? project = ();
     string? logLevel = ();
 };
 
