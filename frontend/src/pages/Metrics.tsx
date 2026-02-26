@@ -17,8 +17,8 @@
  */
 import { Button, Card, CardContent, Checkbox, CircularProgress, Grid, IconButton, ListItemText, MenuItem, PageContent, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from '@wso2/oxygen-ui';
 import { LineChart } from '@wso2/oxygen-ui-charts-react';
-import { BarChart3, RefreshCw } from '@wso2/oxygen-ui-icons-react';
-import { useMemo, useState, type JSX } from 'react';
+import { BarChart3, Download, RefreshCw } from '@wso2/oxygen-ui-icons-react';
+import { useCallback, useMemo, useRef, useState, type JSX } from 'react';
 import { useProjectByHandler, useComponentByHandler, useComponents, useEnvironments, useProjectRuntimes } from '../api/queries';
 import { useMetrics, type MetricEntry, type MetricsRequest } from '../api/metrics';
 import EmptyListing from '../components/EmptyListing';
@@ -74,7 +74,11 @@ function apiDisplayLabel(api: ApiSummary): string {
 
 function apiDisplayLabelWithType(api: ApiSummary, showType: boolean): string {
   const base = apiDisplayLabel(api);
-  if (showType && api.integrationName) return `[${api.integrationName}] ${base}`;
+  if (showType) {
+    const st = api.serviceType || 'BI';
+    if (api.integrationName) return `[${st} · ${api.integrationName}] ${base}`;
+    return `[${st}] ${base}`;
+  }
   return base;
 }
 
@@ -214,6 +218,10 @@ function formatTime(iso: string): string {
 
 const COLORS = ['#4caf50', '#2196f3', '#ff9800', '#e91e63', '#9c27b0'];
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function StatCard({ title, value, color }: { title: string; value: string; color?: string }) {
   return (
     <Card variant="outlined" sx={{ height: '100%' }}>
@@ -236,6 +244,7 @@ export default function Metrics(scope: ProjectScope | ComponentScope): JSX.Eleme
   const { data: singleComponent, isLoading: loadingComponent } = useComponentByHandler(projectId, isComponent ? scope.component : undefined);
   const { data: components = [], isLoading: loadingComponents } = useComponents(scope.org, projectId);
   const { data: environments = [], isLoading: loadingEnvironments } = useEnvironments(projectId);
+  const metricsContentRef = useRef<HTMLDivElement>(null);
 
   const [envFilter, setEnvFilter] = useState('');
   const [timeRange, setTimeRange] = useState('Past 1 hour');
@@ -297,6 +306,164 @@ export default function Metrics(scope: ProjectScope | ComponentScope): JSX.Eleme
   const requestsChartData = useMemo(() => requestsData.map((d) => ({ ...d, label: formatTime(d.time) })), [requestsData]);
   const latencyChartData = useMemo(() => latencyData.map((d) => ({ ...d, label: formatTime(d.time) })), [latencyData]);
 
+  const downloadStatistics = useCallback(() => {
+    const now = new Date();
+    const envName = environments.find((e) => e.id === effectiveEnvId)?.name ?? effectiveEnvId;
+    let integrationLabel = '';
+    if (isComponent && singleComponent) {
+      integrationLabel = singleComponent.displayName;
+    } else if (integrationFilter !== 'all') {
+      integrationLabel = components.find((c) => c.id === integrationFilter)?.displayName ?? '';
+    }
+
+    // Clone an SVG from the DOM with fully inlined computed styles so it renders correctly in standalone HTML
+    function captureChartSvg(wrapper: Element): string {
+      const svg = wrapper.querySelector('svg');
+      if (!svg) return '';
+      const clone = svg.cloneNode(true) as SVGElement;
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+      // Set viewBox for proper responsive scaling
+      const rect = svg.getBoundingClientRect();
+      const w = parseFloat(svg.getAttribute('width') || '') || rect.width;
+      const h = parseFloat(svg.getAttribute('height') || '') || rect.height;
+      if (w && h) clone.setAttribute('viewBox', `0 0 ${w} ${h}`);
+      clone.setAttribute('width', '100%');
+      clone.removeAttribute('height');
+      clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+      // Inline text styles (font-family, font-size, fill, weight) so they survive extraction
+      const origTexts = svg.querySelectorAll('text');
+      const cloneTexts = clone.querySelectorAll('text');
+      origTexts.forEach((orig, i) => {
+        if (!cloneTexts[i]) return;
+        const cs = window.getComputedStyle(orig);
+        cloneTexts[i].setAttribute('style', `font-family:${cs.fontFamily};font-size:${cs.fontSize};fill:${cs.fill || cs.color};font-weight:${cs.fontWeight}`);
+      });
+
+      return clone.outerHTML;
+    }
+
+    // Capture all chart SVGs in DOM order
+    const chartWrappers = metricsContentRef.current?.querySelectorAll('.recharts-wrapper') ?? [];
+    const chartSvgs: string[] = [];
+    chartWrappers.forEach((wrapper) => chartSvgs.push(captureChartSvg(wrapper)));
+
+    // Legend builders matching the Metrics page UI
+    function legendHtml(items: { color: string; label: string }[], vertical = false): string {
+      if (vertical) {
+        return `<div style="margin-top:12px;display:flex;flex-direction:column;gap:4px">${items
+          .map(
+            ({ color, label }) =>
+              `<div style="display:flex;align-items:center;gap:8px"><span style="width:14px;height:3px;background:${color};display:inline-block;border-radius:1px"></span><span style="font-size:12px;color:#666">${escapeHtml(label)}</span></div>`,
+          )
+          .join('')}</div>`;
+      }
+      return `<div style="text-align:center;margin-top:12px">${items
+        .map(
+          ({ color, label }) =>
+            `<span style="display:inline-flex;align-items:center;gap:6px;margin:0 10px"><span style="width:14px;height:3px;background:${color};display:inline-block;border-radius:1px"></span><span style="font-size:12px;color:#666">${escapeHtml(label)}</span></span>`,
+        )
+        .join('')}</div>`;
+    }
+
+    const requestsLegend = legendHtml([
+      { color: '#4caf50', label: 'Success' },
+      { color: '#d32f2f', label: 'Failed' },
+    ]);
+    const latencyLegend = legendHtml([
+      { color: '#4caf50', label: 'Average' },
+      { color: '#2196f3', label: '50th Percentile' },
+      { color: '#ff9800', label: '95th Percentile' },
+      { color: '#9c27b0', label: '99th Percentile' },
+    ]);
+    const apiLegend = legendHtml(
+      apiLineKeys.map((k, i) => ({ color: COLORS[i % COLORS.length], label: k })),
+      true,
+    );
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Metrics Statistics Report</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:1200px;margin:0 auto;padding:32px;color:#1d1d1d;background:#fff}
+  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+  h1{font-size:24px;font-weight:700;margin:0}
+  .meta{color:#666;font-size:13px;line-height:1.7}
+  .stat-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+  .stat-card{border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px}
+  .stat-label{font-size:14px;color:rgba(0,0,0,0.6);margin:0}
+  .stat-value{font-size:28px;font-weight:700;margin:8px 0 0}
+  .stat-value.error{color:#d32f2f}
+  .chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+  .chart-card{border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;overflow:hidden}
+  .chart-card h3{font-size:18px;font-weight:500;margin:0 0 12px;color:#1d1d1d}
+  .chart-card svg{width:100%;height:auto;display:block}
+  .api-table-card{border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;margin-bottom:24px}
+  .api-table-card h3{font-size:18px;font-weight:500;margin:0 0 16px;color:#1d1d1d}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid #eee}
+  th{font-weight:600;color:rgba(0,0,0,0.6);font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+  td.r,th.r{text-align:right}
+  .section-title{font-size:18px;font-weight:500;margin:0 0 12px;color:#1d1d1d}
+  @media print{body{padding:12px}.chart-grid,.api-table-card{break-inside:avoid}}
+  @media(max-width:800px){.stat-cards{grid-template-columns:repeat(2,1fr)}.chart-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Metrics</h1>
+  <div class="meta">
+    ${escapeHtml(envName)} &middot; ${escapeHtml(timeRange)} &middot; Resolution: ${escapeHtml(resolution)}${integrationLabel ? ` &middot; ${escapeHtml(integrationLabel)}` : ''}<br>
+    <span style="font-size:11px;color:#999">Generated ${escapeHtml(now.toLocaleString())}</span>
+  </div>
+</div>
+
+<div class="stat-cards">
+  <div class="stat-card"><p class="stat-label">Total Requests</p><p class="stat-value">${totalRequests.toLocaleString()}</p></div>
+  <div class="stat-card"><p class="stat-label">Error Count</p><p class="stat-value error">${errorCount.toLocaleString()}</p></div>
+  <div class="stat-card"><p class="stat-label">Error Percentage</p><p class="stat-value error">${errorPercentage.toFixed(2)}%</p></div>
+  <div class="stat-card"><p class="stat-label">95th Percentile (Latest)</p><p class="stat-value">${latestP95.toFixed(2)} ms</p></div>
+</div>
+
+${chartSvgs.length >= 2 ? `<div class="chart-grid">
+  <div class="chart-card"><h3>Requests Per Minute</h3>${chartSvgs[0]}${requestsLegend}</div>
+  <div class="chart-card"><h3>Request Latency</h3>${chartSvgs[1]}${latencyLegend}</div>
+</div>` : ''}
+
+${apis.length > 0 ? `<div class="api-table-card">
+  <h3>Most Used APIs</h3>
+  <table>
+    <thead><tr><th>Rank</th><th>Integration</th><th>API Name</th><th>Method</th><th class="r">Request Count</th><th class="r">Avg Response Time (ms)</th><th class="r">Error Rate (%)</th></tr></thead>
+    <tbody>
+    ${apis.map((api, i) => {
+      const apiName = escapeHtml(api.name + (api.deployment ? ` (${api.deployment})` : ''));
+      return `<tr><td>${i + 1}</td><td>${escapeHtml(api.integrationName) || '\u2014'}</td><td>${apiName}</td><td>${escapeHtml(api.method) || '\u2014'}</td><td class="r">${api.requestCount}</td><td class="r">${api.avgResponseTime.toFixed(2)}</td><td class="r">${api.errorRate.toFixed(2)}</td></tr>`;
+    }).join('\n    ')}
+    </tbody>
+  </table>
+</div>` : ''}
+
+${chartSvgs.length >= 4 ? `<h3 class="section-title">Statistics of APIs</h3>
+<div class="chart-grid">
+  <div class="chart-card"><h3>Requests Per Minute</h3>${chartSvgs[2]}${apiLegend}</div>
+  <div class="chart-card"><h3>Average Request Latency</h3>${chartSvgs[3]}${apiLegend}</div>
+</div>` : ''}
+
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `metrics-report-${now.toISOString().slice(0, 19).replace(/:/g, '-')}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [environments, effectiveEnvId, timeRange, resolution, isComponent, singleComponent, integrationFilter, components, totalRequests, errorCount, errorPercentage, latestP95, apis, apiLineKeys]);
+
   // Early returns
   const loadingContext = isComponent ? loadingComponent : loadingComponents;
   if (loadingProject || loadingContext || loadingEnvironments) {
@@ -326,11 +493,18 @@ export default function Metrics(scope: ProjectScope | ComponentScope): JSX.Eleme
         <Typography variant="h5" sx={{ fontWeight: 700 }}>
           Metrics
         </Typography>
-        <Tooltip title="Refresh">
-          <IconButton size="small" onClick={() => refetch()} disabled={!metricsRequest}>
-            <RefreshCw size={18} />
-          </IconButton>
-        </Tooltip>
+        <Stack direction="row" gap={1}>
+          <Tooltip title="Download Statistics">
+            <IconButton size="small" onClick={downloadStatistics} disabled={inboundMetrics.length === 0}>
+              <Download size={18} />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Refresh">
+            <IconButton size="small" onClick={() => refetch()} disabled={!metricsRequest}>
+              <RefreshCw size={18} />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       </Stack>
 
       <Stack direction="row" gap={2} sx={{ mb: 3 }} flexWrap="wrap" alignItems="center">
@@ -383,7 +557,7 @@ export default function Metrics(scope: ProjectScope | ComponentScope): JSX.Eleme
       ) : inboundMetrics.length === 0 ? (
         <EmptyListing icon={<BarChart3 size={48} />} title="No metrics data" description="No metrics available for the selected time range." />
       ) : (
-        <>
+        <div ref={metricsContentRef}>
           {/* Summary cards */}
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid size={{ xs: 12, sm: 6, md: 3 }}>
@@ -565,7 +739,7 @@ export default function Metrics(scope: ProjectScope | ComponentScope): JSX.Eleme
               </Grid>
             </>
           )}
-        </>
+        </div>
       )}
     </PageContent>
   );
