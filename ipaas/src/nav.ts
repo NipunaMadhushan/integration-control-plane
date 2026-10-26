@@ -179,6 +179,10 @@ export function newEnvironmentUrl(scope: { org: string }): string {
   return `/organizations/${scope.org}/environments/new`;
 }
 
+export function editEnvironmentUrl(scope: { org: string }, envId: string): string {
+  return `/organizations/${scope.org}/environments/${envId}/edit`;
+}
+
 export function orgCdPipelinesUrl(scope: { org: string }): string {
   return `/organizations/${scope.org}/admin/cd-pipelines`;
 }
@@ -265,6 +269,7 @@ const NAV: Record<Level, NavEntry[]> = {
     { key: 'build', navId: 'build', segment: 'build' },
     { key: 'deploy', navId: 'org-deploy', segment: 'deploy' },
     { key: 'test', navId: 'org-test', segment: 'test' },
+    { key: 'insights', navId: 'org-insights', segment: 'insights' },
     { key: 'logs', navId: 'org-logs', segment: 'logs', parent: 'org-observability' },
     { key: 'metrics', navId: 'org-metrics', segment: 'metrics', parent: 'org-observability' },
     { key: 'cd-pipelines', navId: 'org-cd-pipelines', segment: 'admin/cd-pipelines', parent: 'org-admin' },
@@ -295,12 +300,13 @@ const NAV: Record<Level, NavEntry[]> = {
     { key: 'containers', navId: 'containers', segment: 'admin/containers', parent: 'operate' },
     { key: 'configs-secrets', navId: 'configs-secrets', segment: 'admin/configs', parent: 'operate' },
     { key: 'health-checks', navId: 'health-checks', segment: 'admin/health-checks', parent: 'operate' },
+    { key: 'scaling', navId: 'scaling', segment: 'admin/scaling', parent: 'operate' },
   ],
 };
 
 // Keys that exist only for generic (deployable) service types — switching to a
 // non-generic integration must fall back to overview instead of a dead tab.
-export const GENERIC_ONLY_COMPONENT_KEYS = new Set(['health-checks']);
+export const GENERIC_ONLY_COMPONENT_KEYS = new Set(['health-checks', 'scaling']);
 
 /** The resource key a URL resolves to at its scope (for cross-scope guards). */
 export function resolveResourceKey(pathname: string, scope: Scope): string {
