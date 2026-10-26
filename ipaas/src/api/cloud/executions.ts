@@ -283,10 +283,11 @@ export const fetchExecutionLogs = async (componentId: string, _deploymentTrackId
   return matched.map(toExecutionLogEntry);
 };
 
-// The runtime-arguments schema is a wip-only feature; OpenChoreo has no equivalent
-// endpoint, so surface it as unsupported rather than fabricating an empty schema.
-const ni = (name: string): Promise<never> => Promise.reject(new Error(`[cloud] executions.${name}: not implemented`));
-export const fetchRuntimeArguments = (_componentId: string, _deploymentTrackId: string, _commitHash: string): Promise<RuntimeArgument[]> => ni('fetchRuntimeArguments');
+// GET /components/{name}/runtime-arguments?commit= — the BFF reads the parameters of the
+// Ballerina `main` at the deployed commit. An empty list means the run takes no arguments
+// or its source cannot be read; either way it runs without a form.
+export const fetchRuntimeArguments = (componentId: string, _deploymentTrackId: string, commitHash: string): Promise<RuntimeArgument[]> =>
+  bff.get<RuntimeArgument[]>(`/components/${seg(componentId)}/runtime-arguments${q({ commit: commitHash })}`).then((r) => r ?? []);
 
 // No dedicated count endpoint; approximate from the listed job runs.
 export const fetchTaskExecutionCount = (releaseId: string, componentId = '', envId = '', projectId = ''): Promise<number | null> =>

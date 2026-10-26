@@ -16,23 +16,23 @@
  * under the License.
  */
 
-import { Button, Tooltip } from '@wso2/oxygen-ui';
-import { Play } from '@wso2/oxygen-ui-icons-react';
-import { useMemo } from 'react';
+import { Tooltip } from '@wso2/oxygen-ui';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { useAppNavigate } from '../../../hooks/useAppNavigate';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExecutionConfigs, useRuntimeArguments, useTriggerComponent } from '../../../hooks/useExecutions';
 import { useSchemaConfig } from '../../../hooks/useConfiguration';
 import type { EnvCardActionsProps } from '../../../types/integration';
 import { isDeploymentHealthy } from '../../../utils/deploymentStatus';
-import { IS_CLOUD } from '../../../features';
 import { hasMissingRequiredConfigs } from './configStatus';
 import NextRunLabel from '../../NextRunLabel';
 import ScheduleButton from './ScheduleButton';
+import RunButton from '../automation/RunButton';
+import RunWithArgsDialog from '../automation/RunWithArgsDialog';
 
 /**
- * Automation's right-header slot. Test only leaves the card when the task takes runtime arguments.
+ * Automation's right-header slot. Test runs the task as is; Test with Arguments asks for its
+ * runtime arguments in a drawer first, one row per argument the task declares.
  */
 export default function EnvCardActions({
   component,
@@ -40,8 +40,6 @@ export default function EnvCardActions({
   projectId,
   versionId,
   orgHandler,
-  projectHandler,
-  componentHandler,
   releaseId,
   buildId,
   deploymentPipelineId,
@@ -53,7 +51,6 @@ export default function EnvCardActions({
   onTrigger,
 }: EnvCardActionsProps): ReactNode {
   const queryClient = useQueryClient();
-  const navigate = useAppNavigate();
 
   const { data: scheduleConfig } = useExecutionConfigs(component.id, releaseId, env.id);
   const { data: schemaConfig } = useSchemaConfig(projectId, component.id, envTemplateId, versionId, deployedCommitSha);
@@ -78,27 +75,24 @@ export default function EnvCardActions({
   const actionsDisabled = !!blockedReason;
 
 
-  // Cloud has no runtime-arguments endpoint, so the query stays disabled rather than always failing.
-  const { data: runtimeArgs, isLoading: runtimeArgsLoading } = useRuntimeArguments(component.id, versionId, deployedCommitSha ?? '', !IS_CLOUD);
-  const hasRuntimeArgs = (runtimeArgs?.length ?? 0) > 0;
+  // Undeployed, there is no commit to read the arguments from (and Test is disabled anyway).
+  // A failed lookup leaves runtimeArgs empty, so the drawer offers free-form rows only.
+  const { data: runtimeArgs = [], isLoading: runtimeArgsLoading } = useRuntimeArguments(component.id, versionId, deployedCommitSha ?? '', !!releaseId);
   const triggerRun = useTriggerComponent();
+  const [argsDialogOpen, setArgsDialogOpen] = useState(false);
 
-  const goToTestPage = () => navigate(`/organizations/${orgHandler}/projects/${projectHandler}/components/${componentHandler}/test`);
+  const handleRunSuccess = () => {
+    onNotify({ text: 'Execution triggered successfully', severity: 'success' });
+    // Surfaces the run in this card's executions table before the list refetches.
+    onTrigger(Date.now());
+    queryClient.invalidateQueries({ queryKey: ['taskExecutions'] });
+  };
 
   const handleTest = () => {
-    if (hasRuntimeArgs) {
-      goToTestPage();
-      return;
-    }
     triggerRun.mutate(
       { orgHandler, projectId, componentId: component.id, releaseId, args: [] },
       {
-        onSuccess: () => {
-          onNotify({ text: 'Execution triggered successfully', severity: 'success' });
-          // Surfaces the run in this card's executions table before the list refetches.
-          onTrigger(Date.now());
-          queryClient.invalidateQueries({ queryKey: ['taskExecutions'] });
-        },
+        onSuccess: handleRunSuccess,
         onError: (err) => onNotify({ text: err instanceof Error ? err.message : 'Failed to trigger execution', severity: 'error' }),
       },
     );
@@ -125,11 +119,23 @@ export default function EnvCardActions({
       />
       <Tooltip title={blockedReason} placement="top">
         <span>
-          <Button variant="contained" size="small" startIcon={<Play size={14} />} disabled={actionsDisabled || triggerRun.isPending || runtimeArgsLoading} onClick={handleTest}>
-            Test
-          </Button>
+          <RunButton envCritical={env.critical} disabled={actionsDisabled || runtimeArgsLoading} pending={triggerRun.isPending} onRun={handleTest} onRunWithArgs={() => setArgsDialogOpen(true)} />
         </span>
       </Tooltip>
+      {/* Mounted only while open, so its rows are laid out from the arguments loaded by then. */}
+      {argsDialogOpen && (
+        <RunWithArgsDialog
+          open
+          onClose={() => setArgsDialogOpen(false)}
+          onRunSuccess={handleRunSuccess}
+          envCritical={env.critical}
+          orgHandler={orgHandler}
+          projectId={projectId}
+          componentId={component.id}
+          releaseId={releaseId}
+          runtimeArguments={runtimeArgs}
+        />
+      )}
     </>
   );
 }

@@ -60,12 +60,14 @@ function getFormInputType(arg: RuntimeArgument): FormInputType {
 }
 
 /**
- * A field is required when explicitly flagged, OR when it has no `prefix` — an
- * arg without a prefix is positional, so a value must always be supplied.
+ * A field is required when explicitly flagged, OR when it has no `prefix` and does not
+ * say otherwise — an arg without a prefix is positional, so a value must be supplied
+ * unless the schema marks it `required: false` (a parameter with a default, which the
+ * program fills in when trailing values are left out).
  */
 function isFieldRequired(arg: RuntimeArgument): boolean {
   if (arg.required === true) return true;
-  if (!arg.prefix) return true;
+  if (!arg.prefix) return arg.required !== false;
   return false;
 }
 

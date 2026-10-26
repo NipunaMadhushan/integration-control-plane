@@ -42,6 +42,14 @@ describe('parseRuntimeArgumentsToFormFields', () => {
     expect(fields.map((f) => f.required)).toEqual([true, false, true]);
   });
 
+  it('a positional arg the schema marks required: false is optional', () => {
+    const fields = parseRuntimeArgumentsToFormFields([
+      { name: 'name', type: 'string', required: false }, // has a default
+      { name: 'count', type: 'int', required: true },
+    ]);
+    expect(fields.map((f) => f.required)).toEqual([false, true]);
+  });
+
   it('turns enum values into options and uses displayName as label', () => {
     const [field] = parseRuntimeArgumentsToFormFields([{ name: 'level', type: 'enum', values: ['A', 'B'], displayName: 'Severity' }]);
     expect(field.label).toBe('Severity');
