@@ -29,6 +29,7 @@ import type { DynamicFormData, DynamicFormFieldValue, DynamicFormValidationError
 const NUMERIC_TYPES = ['number', 'int', 'float', 'decimal', 'byte'];
 const REQUIRED_FIELD_ERROR = 'This field is required';
 const REQUIRED_MULTI_VALUE_ERROR = 'At least one value is required';
+export const POSITIONAL_GAP_ERROR = 'Enter a value: arguments are passed in order, and a later one has a value';
 
 export const isNumericType = (type: string): boolean => NUMERIC_TYPES.includes(type);
 
@@ -141,6 +142,25 @@ export function validateRequiredFields(formFields: FormField[], formData: Dynami
   return errors;
 }
 
+/**
+ * Positional arguments bind by position, so an empty one before a filled one would hand
+ * the later value to the wrong parameter. Flags every such gap; `trailingValues` says
+ * values follow the declared arguments. A repeated argument may be empty mid-list: the
+ * program sizes it from the values left over for the parameters after it.
+ */
+export function validatePositionalOrder(runtimeArguments: RuntimeArgument[], formData: DynamicFormData, trailingValues = false): DynamicFormValidationErrors {
+  const errors: DynamicFormValidationErrors = {};
+  let laterFilled = trailingValues;
+  for (let i = runtimeArguments.length - 1; i >= 0; i -= 1) {
+    const arg = runtimeArguments[i];
+    if (arg.prefix) continue;
+    const filled = hasNonEmptyValue(formData[arg.name]);
+    if (!filled && laterFilled && !arg.repeat) errors[arg.name] = POSITIONAL_GAP_ERROR;
+    if (filled) laterFilled = true;
+  }
+  return errors;
+}
+
 export function hasAnyFormData(formData: DynamicFormData): boolean {
   return Object.keys(formData).length > 0 && Object.values(formData).some((value) => hasNonEmptyValue(value));
 }
@@ -162,7 +182,8 @@ function pushArgument(out: TriggerArgument[], arg: RuntimeArgument, stringValue:
  * Serialize the dynamic-form state into the run-pod `args` payload. A checked boolean
  * emits its prefix (flag) or, with no prefix, its literal value; an unchecked one emits
  * nothing. Repeated args emit one entry per non-empty value; everything else follows the
- * prefix/delimiter rules above. Empty values are skipped.
+ * prefix/delimiter rules above. Empty values are skipped, so the form must first pass
+ * validatePositionalOrder: then only trailing positional values can be empty.
  */
 export function buildExecutionArgumentsFromForm(runtimeArguments: RuntimeArgument[], formData: DynamicFormData): TriggerArgument[] {
   const structured: TriggerArgument[] = [];

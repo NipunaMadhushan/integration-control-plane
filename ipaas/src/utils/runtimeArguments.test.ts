@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildExecutionArgumentsFromForm, hasAnyFormData, parseRuntimeArgumentsToFormFields, validateRequiredFields } from './runtimeArguments';
+import { POSITIONAL_GAP_ERROR, buildExecutionArgumentsFromForm, hasAnyFormData, parseRuntimeArgumentsToFormFields, validatePositionalOrder, validateRequiredFields } from './runtimeArguments';
 import type { RuntimeArgument } from '../types/executions';
 
 describe('parseRuntimeArgumentsToFormFields', () => {
@@ -74,6 +74,42 @@ describe('validateRequiredFields', () => {
 
   it('passes when required values are present; optional (prefixed) never blocks', () => {
     expect(validateRequiredFields(fields, { name: 'x', tags: ['a'] })).toEqual({});
+  });
+});
+
+describe('validatePositionalOrder', () => {
+  // main(string name = "World", int times = 1)
+  const args: RuntimeArgument[] = [
+    { name: 'name', type: 'string', required: false },
+    { name: 'times', type: 'int', required: false },
+  ];
+
+  it('flags an empty positional value before a filled one', () => {
+    expect(validatePositionalOrder(args, { name: '', times: '5' })).toEqual({ name: POSITIONAL_GAP_ERROR });
+  });
+
+  it('allows trailing empty values', () => {
+    expect(validatePositionalOrder(args, {})).toEqual({});
+    expect(validatePositionalOrder(args, { name: 'Ada' })).toEqual({});
+  });
+
+  it('counts values that follow the declared arguments', () => {
+    expect(validatePositionalOrder(args, { name: 'Ada' }, true)).toEqual({ times: POSITIONAL_GAP_ERROR });
+  });
+
+  it('ignores prefixed options and lets a repeated argument stay empty', () => {
+    const mixed: RuntimeArgument[] = [
+      { name: 'files', type: 'string', repeat: true },
+      { name: 'verbose', type: 'boolean', prefix: '--verbose' },
+      { name: 'target', type: 'string' },
+    ];
+    expect(validatePositionalOrder(mixed, { files: [''], target: 'x' })).toEqual({});
+  });
+
+  it('keeps the serialized values in their positions once it passes', () => {
+    const formData = { name: 'Ada', times: '5' };
+    expect(validatePositionalOrder(args, formData)).toEqual({});
+    expect(buildExecutionArgumentsFromForm(args, formData).map((a) => a.argument_value)).toEqual(['Ada', '5']);
   });
 });
 

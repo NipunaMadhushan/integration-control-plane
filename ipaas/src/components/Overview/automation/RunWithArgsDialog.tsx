@@ -19,9 +19,11 @@
 import { Alert, Box, Button, CircularProgress, Drawer, IconButton, Stack, Typography } from '@wso2/oxygen-ui';
 import TextField from '../../common/TextField';
 import { Plus, Trash2, X } from '@wso2/oxygen-ui-icons-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTriggerComponent } from '../../../hooks/useExecutions';
-import type { RuntimeArgument, TriggerArgument } from '../../../types/executions';
+import FormFieldTile from '../../AutomationTest/FormFieldTile';
+import type { DynamicFormData, DynamicFormFieldValue, DynamicFormValidationErrors, RuntimeArgument, TriggerArgument } from '../../../types/executions';
+import { buildExecutionArgumentsFromForm, parseRuntimeArgumentsToFormFields, validatePositionalOrder, validateRequiredFields } from '../../../utils/runtimeArguments';
 
 export interface RunWithArgsDialogProps {
   open: boolean;
@@ -36,49 +38,19 @@ export interface RunWithArgsDialogProps {
   runtimeArguments?: RuntimeArgument[];
 }
 
-const REQUIRED_ERROR = 'This argument is required';
-const GAP_ERROR = 'Enter a value: arguments are passed in order, and a later one has a value';
-
-const isFilled = (value: string | undefined): boolean => (value ?? '').trim() !== '';
-
-function placeholderFor(arg: RuntimeArgument): string {
-  const kind = arg.values?.length ? arg.values.join(' | ') : arg.type;
-  return arg.required ? kind : `${kind} (optional)`;
-}
+const isFilled = (value: string): boolean => value.trim() !== '';
 
 /**
- * Declared arguments are positional, so the run gets every declared value up to the last
- * filled one, then the added ones. An empty declared value before a filled value would
- * hand that value to the wrong parameter; an empty required one leaves the program
- * without its value. Added rows keep their free-form behaviour: blanks are dropped.
+ * Declared arguments render as the Test page's fields and serialize the same way. Added
+ * rows are free-form values passed after them; since arguments are positional, they can
+ * only be used once every declared argument before them has a value.
  */
-function validateDeclared(declared: RuntimeArgument[], values: string[], extra: string[]): Record<number, string> {
-  const errors: Record<number, string> = {};
-  const anyExtra = extra.some(isFilled);
-  let lastFilled = -1;
-  declared.forEach((_, i) => {
-    if (isFilled(values[i])) lastFilled = i;
-  });
-  declared.forEach((arg, i) => {
-    if (isFilled(values[i])) return;
-    if (arg.required) errors[i] = REQUIRED_ERROR;
-    else if (anyExtra || i < lastFilled) errors[i] = GAP_ERROR;
-  });
-  return errors;
-}
-
-function buildArgs(declared: RuntimeArgument[], values: string[], extra: string[]): TriggerArgument[] {
-  let end = declared.length;
-  while (end > 0 && !isFilled(values[end - 1])) end -= 1;
-  const named = declared.slice(0, end).map((arg, i) => ({ argument_name: arg.name, argument_value: values[i] ?? '' }));
-  return [...named, ...extra.filter(isFilled).map((value) => ({ argument_name: '', argument_value: value }))];
-}
-
 export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHandler, projectId, componentId, releaseId, runtimeArguments = [] }: RunWithArgsDialogProps) {
   const initialExtra = runtimeArguments.length > 0 ? [] : [''];
-  const [values, setValues] = useState<string[]>([]);
+  const formFields = useMemo(() => parseRuntimeArgumentsToFormFields(runtimeArguments), [runtimeArguments]);
+  const [formData, setFormData] = useState<DynamicFormData>({});
   const [args, setArgs] = useState<string[]>(initialExtra);
-  const [errors, setErrors] = useState<Record<number, string>>({});
+  const [errors, setErrors] = useState<DynamicFormValidationErrors>({});
   const [runError, setRunError] = useState<string | null>(null);
   const trigger = useTriggerComponent();
 
@@ -90,25 +62,23 @@ export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHand
     setArgs((prev) => prev.map((arg, i) => (i === index ? val : arg)));
   };
 
-  const handleDeclaredChange = (index: number, val: string) => {
-    setValues((prev) => {
-      const next = [...prev];
-      next[index] = val;
-      return next;
-    });
+  const handleFieldChange = (fieldId: string, value: DynamicFormFieldValue) => {
+    setFormData((prev) => ({ ...prev, [fieldId]: value }));
     setErrors((prev) => {
-      if (!(index in prev)) return prev;
+      if (!(fieldId in prev)) return prev;
       const next = { ...prev };
-      delete next[index];
+      delete next[fieldId];
       return next;
     });
   };
 
-  const execArgs = buildArgs(runtimeArguments, values, args);
+  const extraFilled = args.some(isFilled);
+  const gaps = validatePositionalOrder(runtimeArguments, formData, extraFilled);
+  const execArgs: TriggerArgument[] = [...buildExecutionArgumentsFromForm(runtimeArguments, formData), ...args.filter(isFilled).map((value) => ({ argument_name: '', argument_value: value }))];
 
   const handleRun = () => {
     setRunError(null);
-    const found = validateDeclared(runtimeArguments, values, args);
+    const found = { ...gaps, ...validateRequiredFields(formFields, formData) };
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
@@ -127,15 +97,16 @@ export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHand
 
   const handleClose = () => {
     (document.activeElement as HTMLElement)?.blur();
-    setValues([]);
+    setFormData({});
     setArgs(initialExtra);
     setErrors({});
     setRunError(null);
     onClose();
   };
 
+  // With a gap, the values would land on the wrong parameters, so no preview is shown.
+  const hasGap = Object.keys(gaps).length > 0;
   const previewJson = JSON.stringify(execArgs.map((a) => a.argument_value));
-  // Declared rows hold their place in the order, so only added rows can be removed.
   const removable = runtimeArguments.length > 0 || args.length > 1;
 
   const drawerSx = {
@@ -166,32 +137,13 @@ export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHand
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
               Arguments
             </Typography>
-            <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, px: 1.5, py: 1, fontFamily: 'monospace', fontSize: '0.75rem', wordBreak: 'break-all' }}>{previewJson}</Box>
+            <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, px: 1.5, py: 1, fontFamily: hasGap ? undefined : 'monospace', fontSize: '0.75rem', wordBreak: 'break-all', color: hasGap ? 'text.secondary' : undefined }}>
+              {hasGap ? 'Fill the arguments in order to see what is passed.' : previewJson}
+            </Box>
           </Box>
 
-          {runtimeArguments.map((arg, index) => (
-            <Stack key={arg.name} gap={0.5}>
-              <Typography variant="caption" color="text.secondary">
-                {arg.displayName ?? arg.name}
-                {arg.required && (
-                  <Typography component="span" variant="caption" sx={{ color: 'error.main' }}>
-                    {' '}
-                    *
-                  </Typography>
-                )}
-              </Typography>
-              {arg.description && (
-                <Typography variant="caption" color="text.secondary">
-                  {arg.description}
-                </Typography>
-              )}
-              <Stack direction="row" gap={1} alignItems="flex-start">
-                <TextField size="small" fullWidth placeholder={placeholderFor(arg)} value={values[index] ?? ''} error={index in errors} helperText={errors[index]} onChange={(e) => handleDeclaredChange(index, e.target.value)} />
-                <IconButton size="small" aria-label="Remove argument" disabled sx={{ mt: 0.5 }}>
-                  <Trash2 size={14} />
-                </IconButton>
-              </Stack>
-            </Stack>
+          {formFields.map((field) => (
+            <FormFieldTile key={field.id} field={field} value={formData[field.id]} onChange={(value) => handleFieldChange(field.id, value)} error={!!errors[field.id]} helperText={errors[field.id]} />
           ))}
 
           {args.map((arg, index) => (

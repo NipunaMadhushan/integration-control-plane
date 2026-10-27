@@ -74,9 +74,8 @@ export default function EnvCardActions({
   const blockedReason = blockers.find(([blocked]) => blocked)?.[1] ?? '';
   const actionsDisabled = !!blockedReason;
 
-  // Undeployed, there is no commit to read the arguments from (and Test is disabled anyway).
   // A failed lookup leaves runtimeArgs empty, so the drawer offers free-form rows only.
-  const { data: runtimeArgs = [], isLoading: runtimeArgsLoading } = useRuntimeArguments(component.id, versionId, deployedCommitSha ?? '', !!releaseId);
+  const { data: runtimeArgs = [], isLoading: runtimeArgsLoading } = useRuntimeArguments(component.id, versionId, deployedCommitSha, !!releaseId);
   const triggerRun = useTriggerComponent();
   const [argsDialogOpen, setArgsDialogOpen] = useState(false);
 
