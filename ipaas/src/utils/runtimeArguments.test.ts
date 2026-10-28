@@ -17,7 +17,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { POSITIONAL_GAP_ERROR, buildExecutionArgumentsFromForm, hasAnyFormData, parseRuntimeArgumentsToFormFields, validatePositionalOrder, validateRequiredFields } from './runtimeArguments';
+import { AFTER_REPEATED_ERROR, POSITIONAL_GAP_ERROR, buildExecutionArgumentsFromForm, hasAnyFormData, parseRuntimeArgumentsToFormFields, validatePositionalOrder, validateRequiredFields } from './runtimeArguments';
 import type { RuntimeArgument } from '../types/executions';
 
 describe('parseRuntimeArgumentsToFormFields', () => {
@@ -104,6 +104,24 @@ describe('validatePositionalOrder', () => {
       { name: 'count', type: 'int', required: true },
     ];
     expect(validatePositionalOrder(nilableFirst, { count: '3' })).toEqual({ region: POSITIONAL_GAP_ERROR });
+  });
+
+  describe('a repeated argument before others', () => {
+    // main(string[] tags, string name, string? suffix)
+    const listFirst: RuntimeArgument[] = [
+      { name: 'tags', type: 'string', repeat: true, required: false },
+      { name: 'name', type: 'string', required: true },
+      { name: 'suffix', type: 'string', required: false },
+    ];
+
+    it('may stay empty, since the program leaves the values to the parameters after it', () => {
+      expect(validatePositionalOrder(listFirst, { tags: [''], name: 'x', suffix: 'y' })).toEqual({});
+    });
+
+    it('needs every parameter after it filled once it has values', () => {
+      expect(validatePositionalOrder(listFirst, { tags: ['a', 'b'], name: 'x' })).toEqual({ suffix: AFTER_REPEATED_ERROR });
+      expect(validatePositionalOrder(listFirst, { tags: ['a', 'b'], name: 'x', suffix: 'y' })).toEqual({});
+    });
   });
 
   it('ignores prefixed options and lets a repeated argument stay empty', () => {

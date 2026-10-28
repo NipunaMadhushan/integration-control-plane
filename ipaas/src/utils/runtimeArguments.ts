@@ -30,6 +30,7 @@ const NUMERIC_TYPES = ['number', 'int', 'float', 'decimal', 'byte'];
 const REQUIRED_FIELD_ERROR = 'This field is required';
 const REQUIRED_MULTI_VALUE_ERROR = 'At least one value is required';
 export const POSITIONAL_GAP_ERROR = 'Enter a value: arguments are passed in order, and a later one has a value';
+export const AFTER_REPEATED_ERROR = 'Enter a value: an earlier argument takes a list, which would otherwise give its last value to this one';
 
 export const isNumericType = (type: string): boolean => NUMERIC_TYPES.includes(type);
 
@@ -145,19 +146,28 @@ export function validateRequiredFields(formFields: FormField[], formData: Dynami
 /**
  * Positional arguments bind by position, so an empty one before a filled one would hand
  * the later value to the wrong parameter. That holds for a nilable argument too: nil
- * cannot be passed by position. Flags every such gap; `trailingValues` says
- * values follow the declared arguments. A repeated argument may be empty mid-list: the
- * program sizes it from the values left over for the parameters after it.
+ * cannot be passed by position. Flags every such gap; `trailingValues` says values
+ * follow the declared arguments.
+ *
+ * A repeated argument takes every value except one for each positional parameter after
+ * it, filled or not (Ballerina's CliSpec). So it may be empty mid-list, leaving the values
+ * to the parameters after it; but once it has values, each parameter after it needs one,
+ * or the list's last value is bound to it instead.
  */
 export function validatePositionalOrder(runtimeArguments: RuntimeArgument[], formData: DynamicFormData, trailingValues = false): DynamicFormValidationErrors {
   const errors: DynamicFormValidationErrors = {};
+  const positional = runtimeArguments.filter((arg) => !arg.prefix);
+  const filled = positional.map((arg) => hasNonEmptyValue(formData[arg.name]));
   let laterFilled = trailingValues;
-  for (let i = runtimeArguments.length - 1; i >= 0; i -= 1) {
-    const arg = runtimeArguments[i];
-    if (arg.prefix) continue;
-    const filled = hasNonEmptyValue(formData[arg.name]);
-    if (!filled && laterFilled && !arg.repeat) errors[arg.name] = POSITIONAL_GAP_ERROR;
-    if (filled) laterFilled = true;
+  for (let i = positional.length - 1; i >= 0; i -= 1) {
+    if (!filled[i] && laterFilled && !positional[i].repeat) errors[positional[i].name] = POSITIONAL_GAP_ERROR;
+    if (filled[i]) laterFilled = true;
+  }
+  const firstFilledRepeat = positional.findIndex((arg, i) => arg.repeat && filled[i]);
+  if (firstFilledRepeat >= 0) {
+    positional.slice(firstFilledRepeat + 1).forEach((arg, offset) => {
+      if (!arg.repeat && !filled[firstFilledRepeat + 1 + offset]) errors[arg.name] ??= AFTER_REPEATED_ERROR;
+    });
   }
   return errors;
 }
