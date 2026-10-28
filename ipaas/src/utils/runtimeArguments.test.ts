@@ -97,6 +97,15 @@ describe('validatePositionalOrder', () => {
     expect(validatePositionalOrder(args, { name: 'Ada' }, true)).toEqual({ times: POSITIONAL_GAP_ERROR });
   });
 
+  it('requires a nilable argument before a filled one, since nil cannot be passed by position', () => {
+    // main(string? region, int count)
+    const nilableFirst: RuntimeArgument[] = [
+      { name: 'region', type: 'string', required: false },
+      { name: 'count', type: 'int', required: true },
+    ];
+    expect(validatePositionalOrder(nilableFirst, { count: '3' })).toEqual({ region: POSITIONAL_GAP_ERROR });
+  });
+
   it('ignores prefixed options and lets a repeated argument stay empty', () => {
     const mixed: RuntimeArgument[] = [
       { name: 'files', type: 'string', repeat: true },
@@ -119,8 +128,9 @@ describe('buildExecutionArgumentsFromForm', () => {
     expect(buildExecutionArgumentsFromForm(args, { name: 'World' })).toEqual([{ argument_name: 'name', argument_value: 'World' }]);
   });
 
-  it('skips empty non-repeat values', () => {
+  it('skips empty and blank non-repeat values', () => {
     expect(buildExecutionArgumentsFromForm([{ name: 'name', type: 'string' }], { name: '' })).toEqual([]);
+    expect(buildExecutionArgumentsFromForm([{ name: 'name', type: 'string' }], { name: '   ' })).toEqual([]);
   });
 
   it('boolean emits its prefix only when checked', () => {

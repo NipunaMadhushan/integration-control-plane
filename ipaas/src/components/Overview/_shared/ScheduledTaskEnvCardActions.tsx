@@ -22,6 +22,7 @@ import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useExecutionConfigs, useRuntimeArguments, useTriggerComponent } from '../../../hooks/useExecutions';
 import { useSchemaConfig } from '../../../hooks/useConfiguration';
+import type { RuntimeArgument } from '../../../types/executions';
 import type { EnvCardActionsProps } from '../../../types/integration';
 import { isDeploymentHealthy } from '../../../utils/deploymentStatus';
 import { hasMissingRequiredConfigs } from './configStatus';
@@ -29,6 +30,8 @@ import NextRunLabel from '../../NextRunLabel';
 import ScheduleButton from './ScheduleButton';
 import RunButton from '../automation/RunButton';
 import RunWithArgsDialog from '../automation/RunWithArgsDialog';
+
+const NO_ARGUMENTS: RuntimeArgument[] = [];
 
 /**
  * Automation's right-header slot. Test runs the task as is; Test with Arguments asks for its
@@ -74,10 +77,11 @@ export default function EnvCardActions({
   const blockedReason = blockers.find(([blocked]) => blocked)?.[1] ?? '';
   const actionsDisabled = !!blockedReason;
 
-  // A failed lookup leaves runtimeArgs empty, so the drawer offers free-form rows only.
-  const { data: runtimeArgs = [], isLoading: runtimeArgsLoading } = useRuntimeArguments(component.id, versionId, deployedCommitSha, !!releaseId);
   const triggerRun = useTriggerComponent();
   const [argsDialogOpen, setArgsDialogOpen] = useState(false);
+  // Read from the source only once Test with Arguments is picked, since plain Test sends
+  // none. A failed lookup leaves runtimeArgs empty, so the drawer offers free-form rows only.
+  const { data: runtimeArgs = NO_ARGUMENTS, isLoading: runtimeArgsLoading } = useRuntimeArguments(component.id, versionId, deployedCommitSha, argsDialogOpen);
 
   const handleRunSuccess = () => {
     onNotify({ text: 'Execution triggered successfully', severity: 'success' });
@@ -117,11 +121,11 @@ export default function EnvCardActions({
       />
       <Tooltip title={blockedReason} placement="top">
         <span>
-          <RunButton envCritical={env.critical} disabled={actionsDisabled || runtimeArgsLoading} pending={triggerRun.isPending} onRun={handleTest} onRunWithArgs={() => setArgsDialogOpen(true)} />
+          <RunButton envCritical={env.critical} disabled={actionsDisabled} pending={triggerRun.isPending || runtimeArgsLoading} onRun={handleTest} onRunWithArgs={() => setArgsDialogOpen(true)} />
         </span>
       </Tooltip>
-      {/* Mounted only while open, so its rows are laid out from the arguments loaded by then. */}
-      {argsDialogOpen && (
+      {/* Mounted once the arguments have loaded, so its rows are laid out from them. */}
+      {argsDialogOpen && !runtimeArgsLoading && (
         <RunWithArgsDialog open onClose={() => setArgsDialogOpen(false)} onRunSuccess={handleRunSuccess} envCritical={env.critical} orgHandler={orgHandler} projectId={projectId} componentId={component.id} releaseId={releaseId} runtimeArguments={runtimeArgs} />
       )}
     </>

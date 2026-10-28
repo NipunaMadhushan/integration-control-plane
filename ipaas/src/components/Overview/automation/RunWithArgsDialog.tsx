@@ -40,12 +40,14 @@ export interface RunWithArgsDialogProps {
 
 const isFilled = (value: string): boolean => value.trim() !== '';
 
+const NO_ARGUMENTS: RuntimeArgument[] = [];
+
 /**
  * Declared arguments render as the Test page's fields and serialize the same way. Added
  * rows are free-form values passed after them; since arguments are positional, they can
  * only be used once every declared argument before them has a value.
  */
-export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHandler, projectId, componentId, releaseId, runtimeArguments = [] }: RunWithArgsDialogProps) {
+export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHandler, projectId, componentId, releaseId, runtimeArguments = NO_ARGUMENTS }: RunWithArgsDialogProps) {
   const initialExtra = runtimeArguments.length > 0 ? [] : [''];
   const formFields = useMemo(() => parseRuntimeArgumentsToFormFields(runtimeArguments), [runtimeArguments]);
   const [formData, setFormData] = useState<DynamicFormData>({});
@@ -164,6 +166,12 @@ export default function RunWithArgsDialog({ open, onClose, onRunSuccess, orgHand
         <Button variant="text" size="small" startIcon={<Plus size={14} />} onClick={handleAddArg} sx={{ mt: 1.5, px: 0 }}>
           Add Argument
         </Button>
+        {/* Past its declared arguments, a program only reads options; extra values fail the run. */}
+        {runtimeArguments.length > 0 && !runtimeArguments.some((arg) => arg.repeat) && (
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+            The program declares only the arguments above. Add values only for options it reads, such as --name=value.
+          </Typography>
+        )}
 
         {runError && (
           <Alert severity="error" sx={{ mt: 2 }}>

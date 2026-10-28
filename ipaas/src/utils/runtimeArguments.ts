@@ -144,7 +144,8 @@ export function validateRequiredFields(formFields: FormField[], formData: Dynami
 
 /**
  * Positional arguments bind by position, so an empty one before a filled one would hand
- * the later value to the wrong parameter. Flags every such gap; `trailingValues` says
+ * the later value to the wrong parameter. That holds for a nilable argument too: nil
+ * cannot be passed by position. Flags every such gap; `trailingValues` says
  * values follow the declared arguments. A repeated argument may be empty mid-list: the
  * program sizes it from the values left over for the parameters after it.
  */
@@ -200,7 +201,8 @@ export function buildExecutionArgumentsFromForm(runtimeArguments: RuntimeArgumen
     }
 
     if (!arg.repeat) {
-      if (value === undefined || value === null || value === '') return;
+      // Blank counts as empty, as it does for validation.
+      if (value === undefined || value === null || String(value).trim() === '') return;
       pushArgument(structured, arg, String(value));
       return;
     }
